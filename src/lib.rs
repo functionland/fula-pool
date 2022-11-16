@@ -3,19 +3,18 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_core::bounded::BoundedVec;
 use sp_runtime::RuntimeDebug;
+use std::collections::HashMap;
+use std::iter::Map;
 
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
-
-/// Type alias for a BoundedVec, currently used for pool name bounds.
-pub type BoundedVecOf<T> = BoundedVec<u8, <T as Config>::StringLimit>;
 
 /// Pool
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct Pool<T: Config> {
     /// Pool name, bounded by Config::StringLimit
-    pub name: BoundedVecOf<T>,
+    pub name: BoundedVec<u8, T::StringLimit>,
     /// Optional owner, there is no pool owner when a pool is created by the system.
     pub owner: Option<T::AccountId>,
     /// Optional parent, only set when a pool has been created by the system. Unset when the pool
@@ -41,10 +40,53 @@ impl User {
     }
 }
 
+/// An enum that represents a vote result.
+pub(crate) enum VoteResult {
+    /// Majority voted for.
+    Accepted,
+    /// Majority voted against.
+    Denied,
+    /// Not conclusive yet.
+    Inconclusive,
+}
+
+/// The current implementation of `PoolJoinRequest` only cares about positive votes and keeps track
+/// of everyone that voted.
+/// TODO: we might have to cover corner-cases, such as:
+/// 1. When a user voted for somebody and left
+/// 2. When a user left from the pool without voting, we can only recalculate this when another user
+/// votes
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
+pub struct PoolJoinRequest<T: Config> {
+    /// Prevents a user to vote twice on the same `PoolJoinRequest`.
+    pub voted: BoundedVec<T::AccountId, T::MaxPoolParticipants>,
+    /// Currently we only calculate positive votes to avoid having to iterate through voters map.
+    /// We can easily calculate negative votes by taking the `voted` length and subtracting
+    /// `positivte_votes` from it.
+    pub positive_votes: u16,
+}
+
+impl<T: Config> PoolJoinRequest<T> {
+    /// A method that checks whether or not a user has been accepted to a pool.
+    pub(crate) fn check_votes(&self, num_participants: u16) -> VoteResult {
+        // More than half of the participants voted for this user.
+        if self.positive_votes > num_participants / 2 {
+            return VoteResult::Accepted;
+        }
+
+        // More than half of the participants voted against this user.
+        if self.voted.len() as u16 - self.positive_votes > num_participants / 2 {
+            return VoteResult::Denied;
+        }
+
+        VoteResult::Inconclusive
+    }
+}
+
 // TODO: Implement benchmarks for proper weight calculation
 #[frame_support::pallet]
 pub mod pallet {
-    use crate::{BoundedVecOf, Pool, PoolId, User};
+    use crate::{Pool, PoolId, User};
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
 
@@ -63,6 +105,10 @@ pub mod pallet {
         /// The maximum length of a name or symbol stored on-chain.
         #[pallet::constant]
         type StringLimit: Get<u32>;
+
+        /// The maximum number of pool participants.
+        #[pallet::constant]
+        type MaxPoolParticipants: Get<u32>;
     }
 
     /// An incremental value reflecting all pools created so far.
@@ -160,7 +206,7 @@ pub mod pallet {
                 *id
             });
 
-            let bounded_name: BoundedVecOf<T> = name
+            let bounded_name: BoundedVec<u8, T::StringLimit> = name
                 .clone()
                 .try_into()
                 .map_err(|_| Error::<T>::NameTooLong)?;
