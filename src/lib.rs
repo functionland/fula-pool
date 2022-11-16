@@ -3,8 +3,8 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_core::bounded::BoundedVec;
 use sp_runtime::RuntimeDebug;
-use std::collections::HashMap;
-use std::iter::Map;
+
+
 
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
