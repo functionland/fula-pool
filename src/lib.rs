@@ -7,6 +7,7 @@ use sp_runtime::RuntimeDebug;
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
 
+/// Type alias for a BoundedVec, currently used for pool name bounds.
 pub type BoundedVecOf<T> = BoundedVec<u8, <T as Config>::StringLimit>;
 
 /// Pool
@@ -22,13 +23,19 @@ pub struct Pool<T: Config> {
     pub parent: Option<PoolId>,
 }
 
+/// User data for pool users. Created if a user has been previously unknown by the pool system, in
+/// case of a new user trying to create or join a pool.
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
 pub struct User {
+    /// Optional PoolId, signifies membership in a pool.
     pub pool_id: Option<PoolId>,
+    /// Signifies whether or not a user has pending join requests. If this is set to true - the
+    /// `pool_id` should be `None`.
     pub join_requested: bool,
 }
 
 impl User {
+    /// Signifies whether or not a user can create or join a pool.
     pub(crate) fn is_free(&self) -> bool {
         self.pool_id.is_none() && !self.join_requested
     }
@@ -133,6 +140,8 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         #[pallet::weight(10_000)]
+        /// Creates a new pool.
+        ///
         /// TODO: Deposit; check the current pool number. Currently we check the PoolId to retrieve
         /// the pool number, but if we want to delete empty pools - then we need to retrieve the
         /// actual pool number from storage, for which a CountedMap should be used.
