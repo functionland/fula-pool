@@ -77,7 +77,7 @@ pub mod pallet {
     /// Maximum number of members that may belong to a pool. If `None`, then the count of
     /// members is not bound on a per pool basis.
     #[pallet::storage]
-    pub type MaxPoolMembersPerPool<T: Config> = StorageValue<_, u16, OptionQuery>;
+    pub type MaxPoolParticipants<T: Config> = StorageValue<_, u16, OptionQuery>;
 
     /// Pools storage
     #[pallet::storage]
