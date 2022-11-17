@@ -1,5 +1,6 @@
 use crate::pallet::Config;
 use codec::{Decode, Encode, MaxEncodedLen};
+use frame_support::traits::Defensive;
 use frame_support::traits::Len;
 use scale_info::TypeInfo;
 use sp_core::bounded::BoundedVec;
@@ -187,11 +188,14 @@ pub mod pallet {
         },
 
         /// A user has been accepted to the pool
-        Accepted { user: T::AccountId, pool_id: PoolId },
+        Accepted {
+            account: T::AccountId,
+            pool_id: PoolId,
+        },
 
         /// A user has been denied access to the pool.
         Denied {
-            stash: T::AccountId,
+            account: T::AccountId,
             pool_id: PoolId,
         },
         /// Pool's capacity has been reached,
@@ -209,31 +213,26 @@ pub mod pallet {
     pub enum Error<T> {
         /// User is already attached to a pool or has a pending join request.
         UserBusy,
-
         /// Maximum pool number has been reached.
         MaxPools,
-
         /// The pool name supplied was too long.
         NameTooLong,
-
         /// The pool does not exist.
         PoolDoesNotExist,
-
         /// The pool join request does not exist.
         RequestDoesNotExist,
-
         /// The pool is at max capacity.
         CapacityReached,
-
         /// The user does not exist.
         UserDoesNotExist,
-
         /// Access denied due to invalid data, e.g. user is trying to leave the pool that it does
-        /// not belong to.
+        /// not belong to or vote without rights.
         AccessDenied,
-
-        /// Internal error
+        /// Internal error.
         InternalError,
+        /// The user has already voted.
+        /// TODO: might be considered slashable behaviour as it wastes resources.
+        AlreadyVoted,
     }
 
     #[pallet::call]
@@ -347,18 +346,116 @@ pub mod pallet {
         #[pallet::weight(10_000)]
         pub fn cancel_join(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
             let account = ensure_signed(origin)?;
-            let _pool = Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
-
+            Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
             let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
 
             user.request_pool_id = None;
             Users::<T>::set(&account, Some(user));
 
-            let request = PoolRequest::<T>::default();
-            PoolRequests::<T>::insert(&pool_id, &account, request);
+            PoolRequests::<T>::remove(&pool_id, &account);
 
             Self::deposit_event(Event::<T>::RequestWithdrawn { pool_id, account });
             Ok(())
+        }
+
+        /// Vote for a `PoolRequest`. If `positive` is set to `false` - that's voting against.
+        /// TODO: Currently does not cover pool overflow scenario and simply fails then.
+        #[pallet::weight(10_000)]
+        pub fn vote(
+            origin: OriginFor<T>,
+            pool_id: PoolId,
+            account: T::AccountId,
+            positive: bool,
+        ) -> DispatchResult {
+            let voter = ensure_signed(origin)?;
+            let mut request =
+                Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
+
+            let voter_user = Self::user(&voter).ok_or(Error::<T>::UserDoesNotExist)?;
+            ensure!(
+                voter_user.pool_id.is_some() && voter_user.pool_id.unwrap() == pool_id,
+                Error::<T>::AccessDenied
+            );
+
+            let mut voted = request.voted.clone();
+
+            match voted.binary_search(&voter) {
+                Ok(_) => Err(Error::<T>::AlreadyVoted.into()),
+
+                Err(index) => {
+                    // This should never fail.
+                    voted
+                        .try_insert(index, voter.clone())
+                        .map_err(|_| Error::<T>::InternalError)
+                        .defensive()?;
+
+                    // Increment votes if positive.
+                    if positive {
+                        request.positive_votes += 1;
+                    }
+                    request.voted = voted;
+
+                    // This should never fail.
+                    let mut pool = Self::pool(&pool_id)
+                        .ok_or(Error::<T>::PoolDoesNotExist)
+                        .defensive()?;
+
+                    // TODO: to be removed when we implement copy for pools.
+                    ensure!(!pool.is_full(), Error::<T>::CapacityReached);
+
+                    // TODO: Refactor this into smaller methods.
+                    match request.check_votes(pool.participants.len() as u16) {
+                        // If the use has been accepted - remove the PoolRequest, update the user to
+                        // link them to the pool and remove PoolRequest reference. Also add them to
+                        // pool participants.
+                        VoteResult::Accepted => {
+                            // This should never fail.
+                            let mut user = Self::user(&account)
+                                .ok_or(Error::<T>::UserDoesNotExist)
+                                .defensive()?;
+
+                            PoolRequests::<T>::remove(&pool_id, &account);
+                            let mut participants = pool.participants.clone();
+                            match participants.binary_search(&account) {
+                                // should never happen
+                                Ok(_) => Err(Error::<T>::InternalError.into()),
+                                Err(index) => {
+                                    participants
+                                        .try_insert(index, account.clone())
+                                        .map_err(|_| Error::<T>::InternalError)
+                                        .defensive()?;
+                                    pool.participants = participants;
+                                    Pools::<T>::set(&pool_id, Some(pool));
+                                    user.pool_id = Some(pool_id);
+                                    user.request_pool_id = None;
+                                    Users::<T>::set(&account, Some(user));
+                                    Self::deposit_event(Event::<T>::Accepted { pool_id, account });
+                                    Ok(())
+                                }
+                            }
+                            .defensive()
+                        }
+                        // If the user has been denied access to the pool - remove the PoolRequest
+                        // and it's reference from the user profile.
+                        VoteResult::Denied => {
+                            let mut user = Self::user(&account)
+                                .ok_or(Error::<T>::UserDoesNotExist)
+                                .defensive()?;
+                            user.request_pool_id = None;
+                            Users::<T>::set(&account, Some(user));
+                            PoolRequests::<T>::remove(&pool_id, &account);
+                            Self::deposit_event(Event::<T>::Denied { pool_id, account });
+                            Ok(())
+                        }
+                        // If the vote result is inconclusive - just set the incremented vote count
+                        // and add the voter to the PoolRequest.
+                        VoteResult::Inconclusive => {
+                            PoolRequests::<T>::set(&pool_id, &account, Some(request));
+                            Ok(())
+                        }
+                    }
+                }
+            }
         }
     }
 
