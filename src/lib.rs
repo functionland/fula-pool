@@ -389,7 +389,8 @@ pub mod pallet {
                         .map_err(|_| Error::<T>::InternalError)
                         .defensive()?;
 
-                    // Increment votes if positive.
+                    // Increment votes if positive, we do all that here to be able to calculate the
+                    // votes as we need to do it on every vote.
                     if positive {
                         request.positive_votes += 1;
                     }
