@@ -1,15 +1,16 @@
 use crate::pallet::Config;
 use codec::{Decode, Encode, MaxEncodedLen};
+use frame_support::traits::Len;
 use scale_info::TypeInfo;
 use sp_core::bounded::BoundedVec;
+use sp_core::{bounded_vec, Get};
 use sp_runtime::RuntimeDebug;
-
-
 
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
 
 /// Pool
+/// TODO: we we need an actual list of users in each pool? If so - we'll need to rething the storage
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct Pool<T: Config> {
@@ -20,6 +21,14 @@ pub struct Pool<T: Config> {
     /// Optional parent, only set when a pool has been created by the system. Unset when the pool
     /// reaches at least 3 members.
     pub parent: Option<PoolId>,
+    /// The current pool participants.
+    pub participants: BoundedVec<T::AccountId, T::MaxPoolParticipants>,
+}
+
+impl<T: Config> Pool<T> {
+    pub fn is_full(&self) -> bool {
+        self.participants.len() == T::MaxPoolParticipants::get() as usize
+    }
 }
 
 /// User data for pool users. Created if a user has been previously unknown by the pool system, in
@@ -28,15 +37,15 @@ pub struct Pool<T: Config> {
 pub struct User {
     /// Optional PoolId, signifies membership in a pool.
     pub pool_id: Option<PoolId>,
-    /// Signifies whether or not a user has pending join requests. If this is set to true - the
-    /// `pool_id` should be `None`.
-    pub join_requested: bool,
+    /// Signifies whether or not a user has a pending join request to a given pool. If this is set -
+    /// the `pool_id` should be `None`.
+    pub request_pool_id: Option<PoolId>,
 }
 
 impl User {
     /// Signifies whether or not a user can create or join a pool.
     pub(crate) fn is_free(&self) -> bool {
-        self.pool_id.is_none() && !self.join_requested
+        self.pool_id.is_none() && self.request_pool_id.is_none()
     }
 }
 
@@ -53,11 +62,12 @@ pub(crate) enum VoteResult {
 /// The current implementation of `PoolJoinRequest` only cares about positive votes and keeps track
 /// of everyone that voted.
 /// TODO: we might have to cover corner-cases, such as:
-/// 1. When a user voted for somebody and left
+/// 1. When a user voted for somebody and left (possibly not the worst case)
 /// 2. When a user left from the pool without voting, we can only recalculate this when another user
 /// votes
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
-pub struct PoolJoinRequest<T: Config> {
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct PoolRequest<T: Config> {
     /// Prevents a user to vote twice on the same `PoolJoinRequest`.
     pub voted: BoundedVec<T::AccountId, T::MaxPoolParticipants>,
     /// Currently we only calculate positive votes to avoid having to iterate through voters map.
@@ -66,7 +76,16 @@ pub struct PoolJoinRequest<T: Config> {
     pub positive_votes: u16,
 }
 
-impl<T: Config> PoolJoinRequest<T> {
+impl<T: Config> Default for PoolRequest<T> {
+    fn default() -> Self {
+        PoolRequest {
+            positive_votes: 0,
+            voted: BoundedVec::default(),
+        }
+    }
+}
+
+impl<T: Config> PoolRequest<T> {
     /// A method that checks whether or not a user has been accepted to a pool.
     pub(crate) fn check_votes(&self, num_participants: u16) -> VoteResult {
         // More than half of the participants voted for this user.
@@ -86,9 +105,10 @@ impl<T: Config> PoolJoinRequest<T> {
 // TODO: Implement benchmarks for proper weight calculation
 #[frame_support::pallet]
 pub mod pallet {
-    use crate::{Pool, PoolId, User};
+    use crate::*;
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
+    use sp_runtime::bounded_vec;
 
     #[pallet::pallet]
     #[pallet::generate_store(pub (super) trait Store)]
@@ -106,7 +126,8 @@ pub mod pallet {
         #[pallet::constant]
         type StringLimit: Get<u32>;
 
-        /// The maximum number of pool participants.
+        /// The maximum number of pool participants. For this to be efficient it has to a maximum of
+        /// `u16::MAX`. The current idea is that it does not have to be larger than 200.
         #[pallet::constant]
         type MaxPoolParticipants: Get<u32>;
     }
@@ -120,29 +141,27 @@ pub mod pallet {
     #[pallet::storage]
     pub type MaxPools<T: Config> = StorageValue<_, PoolId, OptionQuery>;
 
-    /// Maximum number of members that may belong to a pool. If `None`, then the count of
-    /// members is not bound on a per pool basis.
-    #[pallet::storage]
-    pub type MaxPoolParticipants<T: Config> = StorageValue<_, u16, OptionQuery>;
-
     /// Pools storage
     #[pallet::storage]
+    #[pallet::getter(fn pool)]
     pub type Pools<T: Config> = StorageMap<_, Blake2_128Concat, PoolId, Pool<T>, OptionQuery>;
-    //
-    // /// PoolRequests storage
-    // #[pallet::storage]
-    // pub type PoolRequests<T: Config> = StorageDoubleMap<
-    //     _,
-    //     Blake2_128Concat,
-    //     PoolId,
-    //     Blake2_128Concat,
-    //     T::AccountId,
-    //     PoolRequest<T>,
-    //     OptionQuery,
-    // >;
+
+    /// PoolRequests storage
+    #[pallet::storage]
+    #[pallet::getter(fn request)]
+    pub type PoolRequests<T: Config> = StorageDoubleMap<
+        _,
+        Blake2_128Concat,
+        PoolId,
+        Blake2_128Concat,
+        T::AccountId,
+        PoolRequest<T>,
+        OptionQuery,
+    >;
 
     /// Users storage, useful in case a user wants to leave or join a pool.
     #[pallet::storage]
+    #[pallet::getter(fn user)]
     pub type Users<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, User>;
 
     /// The events of this pallet.
@@ -156,7 +175,16 @@ pub mod pallet {
         },
 
         /// A user requested to join a pool.
-        JoinRequested { user: T::AccountId, pool_id: PoolId },
+        JoinRequested {
+            account: T::AccountId,
+            pool_id: PoolId,
+        },
+
+        /// A user has withdrawn their request to join a pool.
+        RequestWithdrawn {
+            account: T::AccountId,
+            pool_id: PoolId,
+        },
 
         /// A user has been accepted to the pool
         Accepted { user: T::AccountId, pool_id: PoolId },
@@ -168,6 +196,12 @@ pub mod pallet {
         },
         /// Pool's capacity has been reached,
         CapacityReached { pool_id: PoolId },
+
+        /// Pool participant left.
+        ParticipantLeft {
+            account: T::AccountId,
+            pool_id: PoolId,
+        },
     }
 
     #[pallet::error]
@@ -176,24 +210,43 @@ pub mod pallet {
         /// User is already attached to a pool or has a pending join request.
         UserBusy,
 
-        /// Maximum pool number has been reached
+        /// Maximum pool number has been reached.
         MaxPools,
 
-        /// The pool name supplied was too long
+        /// The pool name supplied was too long.
         NameTooLong,
+
+        /// The pool does not exist.
+        PoolDoesNotExist,
+
+        /// The pool join request does not exist.
+        RequestDoesNotExist,
+
+        /// The pool is at max capacity.
+        CapacityReached,
+
+        /// The user does not exist.
+        UserDoesNotExist,
+
+        /// Access denied due to invalid data, e.g. user is trying to leave the pool that it does
+        /// not belong to.
+        AccessDenied,
+
+        /// Internal error
+        InternalError,
     }
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        #[pallet::weight(10_000)]
         /// Creates a new pool.
         ///
         /// TODO: Deposit; check the current pool number. Currently we check the PoolId to retrieve
         /// the pool number, but if we want to delete empty pools - then we need to retrieve the
         /// actual pool number from storage, for which a CountedMap should be used.
+        #[pallet::weight(10_000)]
         pub fn create(origin: OriginFor<T>, name: Vec<u8>) -> DispatchResult {
             let owner = ensure_signed(origin)?;
-            let user = Self::get_user(&owner);
+            let user = Self::get_or_create_user(&owner);
 
             ensure!(user.is_free(), Error::<T>::UserBusy);
 
@@ -215,6 +268,7 @@ pub mod pallet {
                 name: bounded_name,
                 owner: Some(owner.clone()),
                 parent: None,
+                participants: bounded_vec![owner.clone()],
             };
 
             Pools::<T>::insert(pool_id.clone(), pool);
@@ -226,18 +280,105 @@ pub mod pallet {
 
             Ok(())
         }
+
+        /// Allows for the user to leave a pool.
+        #[pallet::weight(10_000)]
+        pub fn leave_pool(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
+            let account = ensure_signed(origin)?;
+
+            let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
+            ensure!(
+                user.pool_id.is_some() && pool_id == user.pool_id.unwrap(),
+                Error::<T>::AccessDenied
+            );
+
+            let mut pool: Pool<T> = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
+            let mut participants = pool.participants.clone();
+
+            match participants.binary_search(&account) {
+                Ok(index) => {
+                    participants.remove(index);
+                    pool.participants = participants;
+                    Pools::<T>::set(&pool_id, Some(pool));
+                    Self::deposit_event(Event::<T>::ParticipantLeft {
+                        pool_id,
+                        account: account.clone(),
+                    });
+                    Ok(())
+                }
+                // This should never happen, but if it does - what do we do? One option is to
+                // deposit an error event. The problem here is that a user will be permanently stuck
+                // in an inconsistent state due to the fact that they have a pool_id in their
+                // profile, but they are not actually a member of a pool. This is a defensive check.
+                Err(_) => {
+                    frame_support::defensive!(
+                        "a user is not a participant of the pool they are assigned to"
+                    );
+                    Err(Error::<T>::InternalError)
+                }
+            }?;
+
+            user.pool_id = None;
+            Users::<T>::set(&account, Some(user));
+
+            Ok(())
+        }
+
+        /// Open a `PoolRequest` to join the pool.
+        #[pallet::weight(10_000)]
+        pub fn join(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
+            let account = ensure_signed(origin)?;
+            let pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
+
+            ensure!(!pool.is_full(), Error::<T>::CapacityReached);
+
+            let mut user = Self::get_or_create_user(&account);
+
+            ensure!(user.is_free(), Error::<T>::UserBusy);
+
+            user.request_pool_id = Some(pool_id);
+            Users::<T>::set(&account, Some(user));
+
+            let request = PoolRequest::<T>::default();
+            PoolRequests::<T>::insert(&pool_id, &account, request);
+
+            Self::deposit_event(Event::<T>::JoinRequested {
+                pool_id,
+                account: account,
+            });
+            Ok(())
+        }
+
+        /// Cancel a `PoolRequest`, useful if a user decides to join another pool or they are stuck in
+        /// the voting queue for too long.
+        #[pallet::weight(10_000)]
+        pub fn cancel_join(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
+            let account = ensure_signed(origin)?;
+            let pool = Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
+
+            let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
+
+            user.request_pool_id = None;
+            Users::<T>::set(&account, Some(user));
+
+            let request = PoolRequest::<T>::default();
+            PoolRequests::<T>::insert(&pool_id, &account, request);
+
+            Self::deposit_event(Event::<T>::RequestWithdrawn {
+                pool_id,
+                account: account,
+            });
+            Ok(())
+        }
     }
 
     impl<T: Config> Pallet<T> {
         /// Get or create a user
-        fn get_user(who: &T::AccountId) -> User {
-            if let Some(user) = Users::<T>::get(who) {
+        fn get_or_create_user(who: &T::AccountId) -> User {
+            if let Some(user) = Self::user(who) {
                 return user;
             }
-            let user = User {
-                pool_id: None,
-                join_requested: false,
-            };
+            let user = User::default();
 
             Users::<T>::insert(who, user.clone());
 
