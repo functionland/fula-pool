@@ -359,6 +359,8 @@ pub mod pallet {
         }
 
         /// Vote for a `PoolRequest`. If `positive` is set to `false` - that's voting against.
+        /// This method also calculates votes each time it's called and takes action once the result
+        /// is conclusive.
         /// TODO: Currently does not cover pool overflow scenario and simply fails then.
         #[pallet::weight(10_000)]
         pub fn vote(
