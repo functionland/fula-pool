@@ -34,16 +34,19 @@ impl<T: Config> Pool<T> {
 
 /// User data for pool users. Created if a user has been previously unknown by the pool system, in
 /// case of a new user trying to create or join a pool.
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
-pub struct User {
+#[derive(Clone, Encode, Decode, Default, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct User<BoundedString> {
     /// Optional PoolId, signifies membership in a pool.
     pub pool_id: Option<PoolId>,
     /// Signifies whether or not a user has a pending join request to a given pool. If this is set -
     /// the `pool_id` should be `None`.
     pub request_pool_id: Option<PoolId>,
+    /// libp2p peerID validated on the client-side.
+    pub peer_id: BoundedString,
 }
 
-impl User {
+impl<BoundedString> User<BoundedString> {
     /// Signifies whether or not a user can create or join a pool.
     pub(crate) fn is_free(&self) -> bool {
         self.pool_id.is_none() && self.request_pool_id.is_none()
@@ -75,13 +78,16 @@ pub struct PoolRequest<T: Config> {
     /// We can easily calculate negative votes by taking the `voted` length and subtracting
     /// `positivte_votes` from it.
     pub positive_votes: u16,
+    /// libp2p peerID validated on the client-side. A pre-requisite for voting
+    pub peer_id: BoundedVec<u8, T::StringLimit>,
 }
 
 impl<T: Config> Default for PoolRequest<T> {
     fn default() -> Self {
         PoolRequest {
-            positive_votes: 0,
-            voted: BoundedVec::default(),
+            positive_votes: Default::default(),
+            voted: Default::default(),
+            peer_id: Default::default(),
         }
     }
 }
@@ -163,7 +169,8 @@ pub mod pallet {
     /// Users storage, useful in case a user wants to leave or join a pool.
     #[pallet::storage]
     #[pallet::getter(fn user)]
-    pub type Users<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, User>;
+    pub type Users<T: Config> =
+        StorageMap<_, Blake2_128Concat, T::AccountId, User<BoundedVec<u8, T::StringLimit>>>;
 
     /// The events of this pallet.
     #[pallet::event]
@@ -237,15 +244,19 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// Creates a new pool.
+        /// Creates a new pool. `peer_id` is a libp2p peerID validated on the client-side.
         ///
         /// TODO: Deposit; check the current pool number. Currently we check the PoolId to retrieve
         /// the pool number, but if we want to delete empty pools - then we need to retrieve the
         /// actual pool number from storage, for which a CountedMap should be used.
         #[pallet::weight(10_000)]
-        pub fn create(origin: OriginFor<T>, name: Vec<u8>) -> DispatchResult {
+        pub fn create(
+            origin: OriginFor<T>,
+            name: Vec<u8>,
+            peer_id: BoundedVec<u8, T::StringLimit>,
+        ) -> DispatchResult {
             let owner = ensure_signed(origin)?;
-            let user = Self::get_or_create_user(&owner);
+            let mut user = Self::get_or_create_user(&owner);
 
             ensure!(user.is_free(), Error::<T>::UserBusy);
 
@@ -271,6 +282,10 @@ pub mod pallet {
             };
 
             Pools::<T>::insert(pool_id.clone(), pool);
+
+            user.pool_id = Some(pool_id.clone());
+            user.peer_id = peer_id.into();
+            Users::<T>::set(&owner, Some(user));
 
             Self::deposit_event(Event::<T>::PoolCreated {
                 pool_id,
@@ -321,7 +336,11 @@ pub mod pallet {
 
         /// Open a `PoolRequest` to join the pool.
         #[pallet::weight(10_000)]
-        pub fn join(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
+        pub fn join(
+            origin: OriginFor<T>,
+            pool_id: PoolId,
+            peer_id: BoundedVec<u8, T::StringLimit>,
+        ) -> DispatchResult {
             let account = ensure_signed(origin)?;
             let pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
 
@@ -334,7 +353,8 @@ pub mod pallet {
             user.request_pool_id = Some(pool_id);
             Users::<T>::set(&account, Some(user));
 
-            let request = PoolRequest::<T>::default();
+            let mut request = PoolRequest::<T>::default();
+            request.peer_id = peer_id;
             PoolRequests::<T>::insert(&pool_id, &account, request);
 
             Self::deposit_event(Event::<T>::JoinRequested { pool_id, account });
@@ -431,6 +451,7 @@ pub mod pallet {
                                     Pools::<T>::set(&pool_id, Some(pool));
                                     user.pool_id = Some(pool_id);
                                     user.request_pool_id = None;
+                                    user.peer_id = request.peer_id.into();
                                     Users::<T>::set(&account, Some(user));
                                     Self::deposit_event(Event::<T>::Accepted { pool_id, account });
                                     Ok(())
@@ -464,7 +485,7 @@ pub mod pallet {
 
     impl<T: Config> Pallet<T> {
         /// Get or create a user
-        fn get_or_create_user(who: &T::AccountId) -> User {
+        fn get_or_create_user(who: &T::AccountId) -> User<BoundedVec<u8, T::StringLimit>> {
             if let Some(user) = Self::user(who) {
                 return user;
             }
