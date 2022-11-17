@@ -3,7 +3,7 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::traits::Len;
 use scale_info::TypeInfo;
 use sp_core::bounded::BoundedVec;
-use sp_core::{bounded_vec, Get};
+use sp_core::Get;
 use sp_runtime::RuntimeDebug;
 
 /// Type used for a unique identifier of each pool.
@@ -300,10 +300,11 @@ pub mod pallet {
                     participants.remove(index);
                     pool.participants = participants;
                     Pools::<T>::set(&pool_id, Some(pool));
-                    Self::deposit_event(Event::<T>::ParticipantLeft {
-                        pool_id,
-                        account: account.clone(),
-                    });
+
+                    user.pool_id = None;
+                    Users::<T>::set(&account, Some(user));
+
+                    Self::deposit_event(Event::<T>::ParticipantLeft { pool_id, account });
                     Ok(())
                 }
                 // This should never happen, but if it does - what do we do? One option is to
@@ -314,14 +315,9 @@ pub mod pallet {
                     frame_support::defensive!(
                         "a user is not a participant of the pool they are assigned to"
                     );
-                    Err(Error::<T>::InternalError)
+                    Err(Error::<T>::InternalError.into())
                 }
-            }?;
-
-            user.pool_id = None;
-            Users::<T>::set(&account, Some(user));
-
-            Ok(())
+            }
         }
 
         /// Open a `PoolRequest` to join the pool.
@@ -342,10 +338,7 @@ pub mod pallet {
             let request = PoolRequest::<T>::default();
             PoolRequests::<T>::insert(&pool_id, &account, request);
 
-            Self::deposit_event(Event::<T>::JoinRequested {
-                pool_id,
-                account: account,
-            });
+            Self::deposit_event(Event::<T>::JoinRequested { pool_id, account });
             Ok(())
         }
 
@@ -354,7 +347,7 @@ pub mod pallet {
         #[pallet::weight(10_000)]
         pub fn cancel_join(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
             let account = ensure_signed(origin)?;
-            let pool = Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
+            let _pool = Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
 
             let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
 
@@ -364,10 +357,7 @@ pub mod pallet {
             let request = PoolRequest::<T>::default();
             PoolRequests::<T>::insert(&pool_id, &account, request);
 
-            Self::deposit_event(Event::<T>::RequestWithdrawn {
-                pool_id,
-                account: account,
-            });
+            Self::deposit_event(Event::<T>::RequestWithdrawn { pool_id, account });
             Ok(())
         }
     }
