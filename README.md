@@ -1,5 +1,5 @@
 # fula-pool
-This is the blockchain (substrate) code that handles the pools in Fula.
+This is the blockchain (substrate) code that handles the pools in Fula. Pools are a set of nodes that join together to share resources with each other or provide resources to others. It limits the amount of CPU and storage needed for the smart contract and enable the chain to do hierarchical consensus.
 
 # Actions
 
