@@ -120,7 +120,7 @@ pub mod pallet {
     use crate::*;
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
-    use sp_runtime::bounded_vec;
+    use sp_runtime::BoundedVec;
 
     #[pallet::pallet]
     #[pallet::generate_store(pub (super) trait Store)]
@@ -283,7 +283,7 @@ pub mod pallet {
                 name: bounded_name,
                 owner: Some(owner.clone()),
                 parent: None,
-                participants: bounded_vec![owner.clone()],
+                participants: sp_core::bounded_vec![owner.clone()],
             };
 
             Pools::<T>::insert(pool_id.clone(), pool);
