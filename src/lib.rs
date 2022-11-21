@@ -283,8 +283,13 @@ pub mod pallet {
                 name: bounded_name,
                 owner: Some(owner.clone()),
                 parent: None,
-                participants: frame_support::bounded_vec![owner.clone()],
+                participants: BoundedVec::<
+                    <T as frame_system::Config>::AccountId,
+                    <T as pallet::Config>::MaxPoolParticipants,
+                >::default(),
             };
+
+            //bounded_vec![owner.clone()]
 
             Pools::<T>::insert(pool_id.clone(), pool);
 
