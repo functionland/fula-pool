@@ -4,8 +4,6 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::traits::Defensive;
 use frame_support::traits::Len;
 use scale_info::TypeInfo;
-// use sp_core::bounded::BoundedVec;
-// use sp_core::Get;
 use sp_runtime::RuntimeDebug;
 
 use frame_support::{dispatch::DispatchResult, ensure, traits::Get, BoundedVec};
@@ -289,8 +287,6 @@ pub mod pallet {
                     <T as pallet::Config>::MaxPoolParticipants,
                 >::default(),
             };
-
-            //bounded_vec![owner.clone()]
 
             Pools::<T>::insert(pool_id.clone(), pool);
 
