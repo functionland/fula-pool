@@ -12,6 +12,8 @@ use sp_runtime::RuntimeDebug;
 use frame_support::{dispatch::DispatchResult, ensure, traits::Get, BoundedVec};
 use sp_std::prelude::*;
 
+pub use pallet::*;
+
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
 
