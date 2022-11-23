@@ -10,6 +10,8 @@ use sp_runtime::RuntimeDebug;
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
 
+pub type BoundedStringOf<T> = BoundedVec<u8, <T as Config>::StringLimit>;
+
 /// Pool
 /// TODO: we we need an actual list of users in each pool? If so - we'll need to rething the storage
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
@@ -170,7 +172,7 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn user)]
     pub type Users<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, User<BoundedVec<u8, T::StringLimit>>>;
+        StorageMap<_, Blake2_128Concat, T::AccountId, User<BoundedStringOf<T>>>;
 
     /// The events of this pallet.
     #[pallet::event]
@@ -426,58 +428,8 @@ pub mod pallet {
                     // TODO: to be removed when we implement copy for pools.
                     ensure!(!pool.is_full(), Error::<T>::CapacityReached);
 
-                    // TODO: Refactor this into smaller methods.
-                    match request.check_votes(pool.participants.len() as u16) {
-                        // If the use has been accepted - remove the PoolRequest, update the user to
-                        // link them to the pool and remove PoolRequest reference. Also add them to
-                        // pool participants.
-                        VoteResult::Accepted => {
-                            // This should never fail.
-                            let mut user = Self::user(&account)
-                                .ok_or(Error::<T>::UserDoesNotExist)
-                                .defensive()?;
-
-                            PoolRequests::<T>::remove(&pool_id, &account);
-                            let mut participants = pool.participants.clone();
-                            match participants.binary_search(&account) {
-                                // should never happen
-                                Ok(_) => Err(Error::<T>::InternalError.into()),
-                                Err(index) => {
-                                    participants
-                                        .try_insert(index, account.clone())
-                                        .map_err(|_| Error::<T>::InternalError)
-                                        .defensive()?;
-                                    pool.participants = participants;
-                                    Pools::<T>::set(&pool_id, Some(pool));
-                                    user.pool_id = Some(pool_id);
-                                    user.request_pool_id = None;
-                                    user.peer_id = request.peer_id.into();
-                                    Users::<T>::set(&account, Some(user));
-                                    Self::deposit_event(Event::<T>::Accepted { pool_id, account });
-                                    Ok(())
-                                }
-                            }
-                            .defensive()
-                        }
-                        // If the user has been denied access to the pool - remove the PoolRequest
-                        // and it's reference from the user profile.
-                        VoteResult::Denied => {
-                            let mut user = Self::user(&account)
-                                .ok_or(Error::<T>::UserDoesNotExist)
-                                .defensive()?;
-                            user.request_pool_id = None;
-                            Users::<T>::set(&account, Some(user));
-                            PoolRequests::<T>::remove(&pool_id, &account);
-                            Self::deposit_event(Event::<T>::Denied { pool_id, account });
-                            Ok(())
-                        }
-                        // If the vote result is inconclusive - just set the incremented vote count
-                        // and add the voter to the PoolRequest.
-                        VoteResult::Inconclusive => {
-                            PoolRequests::<T>::set(&pool_id, &account, Some(request));
-                            Ok(())
-                        }
-                    }
+                    let result = request.check_votes(pool.participants.len() as u16);
+                    Self::process_vote_result(&account, pool_id, pool, request, result)
                 }
             }
         }
@@ -485,7 +437,7 @@ pub mod pallet {
 
     impl<T: Config> Pallet<T> {
         /// Get or create a user
-        fn get_or_create_user(who: &T::AccountId) -> User<BoundedVec<u8, T::StringLimit>> {
+        fn get_or_create_user(who: &T::AccountId) -> User<BoundedStringOf<T>> {
             if let Some(user) = Self::user(who) {
                 return user;
             }
@@ -494,6 +446,76 @@ pub mod pallet {
             Users::<T>::insert(who, user.clone());
 
             user
+        }
+
+        fn get_user(who: &T::AccountId) -> Result<User<BoundedStringOf<T>>, DispatchError> {
+            Self::user(who).ok_or(Error::<T>::UserDoesNotExist.into())
+        }
+
+        fn process_vote_result(
+            who: &T::AccountId,
+            pool_id: PoolId,
+            mut pool: Pool<T>,
+            request: PoolRequest<T>,
+            result: VoteResult,
+        ) -> DispatchResult {
+            match result {
+                // If the user has been accepted - remove the PoolRequest, update the user to
+                // link them to the pool and remove PoolRequest reference. Also add them to
+                // pool participants.
+                VoteResult::Accepted => {
+                    // This should never fail.
+                    let mut user = Self::user(&who)
+                        .ok_or(Error::<T>::UserDoesNotExist)
+                        .defensive()?;
+
+                    PoolRequests::<T>::remove(pool_id, who);
+                    let mut participants = pool.participants.clone();
+                    match participants.binary_search(who) {
+                        // should never happen
+                        Ok(_) => Err(Error::<T>::InternalError.into()),
+                        Err(index) => {
+                            participants
+                                .try_insert(index, who.clone())
+                                .map_err(|_| Error::<T>::InternalError)
+                                .defensive()?;
+                            pool.participants = participants;
+                            Pools::<T>::set(&pool_id, Some(pool));
+                            user.pool_id = Some(pool_id.clone());
+                            user.request_pool_id = None;
+                            user.peer_id = request.peer_id.into();
+                            Users::<T>::set(who, Some(user));
+                            Self::deposit_event(Event::<T>::Accepted {
+                                pool_id,
+                                account: who.clone(),
+                            });
+                            Ok(())
+                        }
+                    }
+                    .defensive()
+                }
+                // If the user has been denied access to the pool - remove the PoolRequest
+                // and it's reference from the user profile.
+                VoteResult::Denied => {
+                    let mut user = Self::user(who)
+                        .ok_or(Error::<T>::UserDoesNotExist)
+                        .defensive()?;
+                    user.request_pool_id = None;
+                    Users::<T>::set(who, Some(user));
+                    PoolRequests::<T>::remove(&pool_id, who);
+                    Self::deposit_event(Event::<T>::Denied {
+                        pool_id,
+                        account: who.clone(),
+                    });
+                    Ok(())
+                }
+                // If the vote result is inconclusive - just set the incremented vote count
+                // and add the voter to the PoolRequest.
+                VoteResult::Inconclusive => {
+                    PoolRequests::<T>::set(&pool_id, who, Some(request));
+                    Ok(())
+                }
+            }
         }
     }
 }
