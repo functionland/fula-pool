@@ -383,8 +383,7 @@ pub mod pallet {
 
             PoolRequests::<T>::remove(&pool_id, &account);
 
-            pool.request_number -= 1;
-            Pools::<T>::set(&pool_id, Some(pool));
+            Self::remove_pool_request(&account, pool_id, pool);
 
             Self::deposit_event(Event::<T>::RequestWithdrawn { pool_id, account });
             Ok(())
@@ -462,6 +461,12 @@ pub mod pallet {
             Self::user(who).ok_or(Error::<T>::UserDoesNotExist.into())
         }
 
+        fn remove_pool_request(who: &T::AccountId, pool_id: PoolId, mut pool: Pool<T>) {
+            PoolRequests::<T>::remove(pool_id, who);
+            pool.request_number -= 1;
+            Pools::<T>::set(&pool_id, Some(pool));
+        }
+
         fn process_vote_result(
             who: &T::AccountId,
             pool_id: PoolId,
@@ -489,13 +494,14 @@ pub mod pallet {
                                 .try_insert(index, who.clone())
                                 .map_err(|_| Error::<T>::InternalError)
                                 .defensive()?;
-                            pool.participants = participants;
-                            pool.request_number -= 1;
-                            Pools::<T>::set(&pool_id, Some(pool));
                             user.pool_id = Some(pool_id.clone());
                             user.request_pool_id = None;
                             user.peer_id = request.peer_id.into();
                             Users::<T>::set(who, Some(user));
+
+                            pool.participants = participants;
+                            Self::remove_pool_request(who, pool_id, pool);
+
                             Self::deposit_event(Event::<T>::Accepted {
                                 pool_id,
                                 account: who.clone(),
@@ -513,13 +519,14 @@ pub mod pallet {
                         .defensive()?;
                     user.request_pool_id = None;
                     Users::<T>::set(who, Some(user));
-                    PoolRequests::<T>::remove(&pool_id, who);
+
+                    Self::remove_pool_request(who, pool_id, pool);
+
                     Self::deposit_event(Event::<T>::Denied {
                         pool_id,
                         account: who.clone(),
                     });
-                    pool.request_number -= 1;
-                    Pools::<T>::set(&pool_id, Some(pool));
+
                     Ok(())
                 }
                 // If the vote result is inconclusive - just set the incremented vote count
