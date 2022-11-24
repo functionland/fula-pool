@@ -306,7 +306,7 @@ pub mod pallet {
         pub fn leave_pool(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
             let account = ensure_signed(origin)?;
 
-            let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
+            let mut user = Self::get_user(&account)?;
             ensure!(
                 user.pool_id.is_some() && pool_id == user.pool_id.unwrap(),
                 Error::<T>::AccessDenied
@@ -376,7 +376,7 @@ pub mod pallet {
             let account = ensure_signed(origin)?;
             Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
             let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
-            let mut pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
+            let pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
 
             user.request_pool_id = None;
             Users::<T>::set(&account, Some(user));
@@ -401,10 +401,11 @@ pub mod pallet {
             positive: bool,
         ) -> DispatchResult {
             let voter = ensure_signed(origin)?;
+            let voter_user = Self::get_user(&voter)?;
+
             let mut request =
                 Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
 
-            let voter_user = Self::user(&voter).ok_or(Error::<T>::UserDoesNotExist)?;
             ensure!(
                 voter_user.pool_id.is_some() && voter_user.pool_id.unwrap() == pool_id,
                 Error::<T>::AccessDenied
@@ -430,7 +431,7 @@ pub mod pallet {
                     request.voted = voted;
 
                     // This should never fail.
-                    let mut pool = Self::pool(&pool_id)
+                    let pool = Self::pool(&pool_id)
                         .ok_or(Error::<T>::PoolDoesNotExist)
                         .defensive()?;
 
@@ -480,9 +481,7 @@ pub mod pallet {
                 // pool participants.
                 VoteResult::Accepted => {
                     // This should never fail.
-                    let mut user = Self::user(&who)
-                        .ok_or(Error::<T>::UserDoesNotExist)
-                        .defensive()?;
+                    let mut user = Self::get_user(who).defensive()?;
 
                     PoolRequests::<T>::remove(pool_id, who);
                     let mut participants = pool.participants.clone();
@@ -514,9 +513,7 @@ pub mod pallet {
                 // If the user has been denied access to the pool - remove the PoolRequest
                 // and it's reference from the user profile.
                 VoteResult::Denied => {
-                    let mut user = Self::user(who)
-                        .ok_or(Error::<T>::UserDoesNotExist)
-                        .defensive()?;
+                    let mut user = Self::get_user(who).defensive()?;
                     user.request_pool_id = None;
                     Users::<T>::set(who, Some(user));
 
