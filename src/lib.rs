@@ -26,11 +26,14 @@ pub struct Pool<T: Config> {
     pub parent: Option<PoolId>,
     /// The current pool participants.
     pub participants: BoundedVec<T::AccountId, T::MaxPoolParticipants>,
+    /// Number of outstanding join requests.
+    pub request_number: u8,
 }
 
 impl<T: Config> Pool<T> {
     pub fn is_full(&self) -> bool {
-        self.participants.len() == T::MaxPoolParticipants::get() as usize
+        self.participants.len() + self.request_number as usize
+            == T::MaxPoolParticipants::get() as usize
     }
 }
 
@@ -131,12 +134,12 @@ pub mod pallet {
             + IsType<<Self as frame_system::Config>::RuntimeEvent>
             + TryInto<Event<Self>>;
 
-        /// The maximum length of a name or symbol stored on-chain.
+        /// The maximum length of a name or symbol stored on-chain. See if this can be limited to
+        /// `u8::MAX`.
         #[pallet::constant]
         type StringLimit: Get<u32>;
 
-        /// The maximum number of pool participants. For this to be efficient it has to a maximum of
-        /// `u16::MAX`. The current idea is that it does not have to be larger than 200.
+        /// The maximum number of pool participants. We are aiming at `u8::MAX`.
         #[pallet::constant]
         type MaxPoolParticipants: Get<u32>;
     }
@@ -281,6 +284,7 @@ pub mod pallet {
                 owner: Some(owner.clone()),
                 parent: None,
                 participants: bounded_vec![owner.clone()],
+                request_number: 0,
             };
 
             Pools::<T>::insert(pool_id.clone(), pool);
@@ -344,7 +348,7 @@ pub mod pallet {
             peer_id: BoundedVec<u8, T::StringLimit>,
         ) -> DispatchResult {
             let account = ensure_signed(origin)?;
-            let pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
+            let mut pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
 
             ensure!(!pool.is_full(), Error::<T>::CapacityReached);
 
@@ -358,6 +362,8 @@ pub mod pallet {
             let mut request = PoolRequest::<T>::default();
             request.peer_id = peer_id;
             PoolRequests::<T>::insert(&pool_id, &account, request);
+            pool.request_number += 1;
+            Pools::<T>::set(&pool_id, Some(pool));
 
             Self::deposit_event(Event::<T>::JoinRequested { pool_id, account });
             Ok(())
@@ -370,11 +376,15 @@ pub mod pallet {
             let account = ensure_signed(origin)?;
             Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
             let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
+            let mut pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
 
             user.request_pool_id = None;
             Users::<T>::set(&account, Some(user));
 
             PoolRequests::<T>::remove(&pool_id, &account);
+
+            pool.request_number -= 1;
+            Pools::<T>::set(&pool_id, Some(pool));
 
             Self::deposit_event(Event::<T>::RequestWithdrawn { pool_id, account });
             Ok(())
@@ -480,6 +490,7 @@ pub mod pallet {
                                 .map_err(|_| Error::<T>::InternalError)
                                 .defensive()?;
                             pool.participants = participants;
+                            pool.request_number -= 1;
                             Pools::<T>::set(&pool_id, Some(pool));
                             user.pool_id = Some(pool_id.clone());
                             user.request_pool_id = None;
@@ -507,6 +518,8 @@ pub mod pallet {
                         pool_id,
                         account: who.clone(),
                     });
+                    pool.request_number -= 1;
+                    Pools::<T>::set(&pool_id, Some(pool));
                     Ok(())
                 }
                 // If the vote result is inconclusive - just set the incremented vote count
