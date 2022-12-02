@@ -1,5 +1,5 @@
 [package]
-name = 'functionland-pool'
+name = 'fula-pool'
 version = "0.1.0"
 authors = ["functionland"]
 edition = "2021"
