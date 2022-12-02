@@ -7,6 +7,12 @@ use sp_core::bounded::BoundedVec;
 use sp_core::Get;
 use sp_runtime::RuntimeDebug;
 
+pub trait PoolInterface {
+    type AccountId;
+    type PoolId;
+    fn is_member(account: Self::AccountId, pool: Self::PoolId) -> bool;
+}
+
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
 
@@ -533,6 +539,17 @@ pub mod pallet {
                     Ok(())
                 }
             }
+        }
+    }
+
+    impl<T: Config> PoolInterface for Pallet<T> {
+        type AccountId = T::AccountId;
+        type PoolId = PoolId;
+
+        fn is_member(account: Self::AccountId, pool: Self::PoolId) -> bool {
+            Self::user(&account)
+                .map(|u| u.pool_id.iter().any(|&v| v == pool))
+                .unwrap_or(false)
         }
     }
 }
