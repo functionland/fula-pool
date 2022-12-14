@@ -1,4 +1,3 @@
-use crate::pallet::Config;
 use codec::EncodeLike;
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::traits::Defensive;
@@ -8,6 +7,8 @@ use sp_core::bounded::BoundedVec;
 use sp_core::Get;
 use sp_runtime::RuntimeDebug;
 use sp_std::fmt::Debug;
+
+pub use pallet::*;
 
 pub trait PoolInterface {
     type AccountId;
