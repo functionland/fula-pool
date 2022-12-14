@@ -9,6 +9,8 @@ use sp_core::Get;
 use sp_runtime::RuntimeDebug;
 use sp_std::fmt::Debug;
 
+pub use pallet::*;
+
 pub trait PoolInterface {
     type AccountId;
     type PoolId: Copy + TypeInfo + Debug + Eq + EncodeLike + Encode + Decode;
