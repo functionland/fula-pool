@@ -1,10 +1,10 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use codec::EncodeLike;
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::traits::Defensive;
 use frame_support::traits::Len;
 use scale_info::TypeInfo;
-use sp_core::bounded::BoundedVec;
-use sp_core::Get;
 use sp_runtime::RuntimeDebug;
 use sp_std::fmt::Debug;
 
@@ -15,6 +15,11 @@ pub trait PoolInterface {
     type PoolId: Copy + TypeInfo + Debug + Eq + EncodeLike + Encode + Decode;
     fn is_member(account: Self::AccountId, pool: Self::PoolId) -> bool;
 }
+
+use frame_support::{dispatch::DispatchResult, ensure, traits::Get, BoundedVec};
+use sp_std::prelude::*;
+
+pub use pallet::*;
 
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
@@ -129,7 +134,7 @@ pub mod pallet {
     use crate::*;
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
-    use sp_runtime::bounded_vec;
+    use sp_runtime::BoundedVec;
 
     #[pallet::pallet]
     #[pallet::generate_store(pub (super) trait Store)]
@@ -288,16 +293,23 @@ pub mod pallet {
                 .try_into()
                 .map_err(|_| Error::<T>::NameTooLong)?;
 
+            let mut bounded_participants = BoundedVec::<
+                <T as frame_system::Config>::AccountId,
+                <T as pallet::Config>::MaxPoolParticipants,
+            >::default();
+
+            ensure!(
+                bounded_participants.try_push(owner.clone()).is_ok(),
+                Error::<T>::CapacityReached
+            );
+
             let pool = Pool {
                 name: bounded_name,
                 owner: Some(owner.clone()),
                 parent: None,
-                participants: bounded_vec![owner.clone()],
-                request_number: 0,
+                participants: bounded_participants,
             };
-
             Pools::<T>::insert(pool_id.clone(), pool);
-
             user.pool_id = Some(pool_id.clone());
             user.peer_id = peer_id.into();
             Users::<T>::set(&owner, Some(user));
