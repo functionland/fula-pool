@@ -308,6 +308,7 @@ pub mod pallet {
                 owner: Some(owner.clone()),
                 parent: None,
                 participants: bounded_participants,
+                request_number: 0,
             };
             Pools::<T>::insert(pool_id.clone(), pool);
             user.pool_id = Some(pool_id.clone());
