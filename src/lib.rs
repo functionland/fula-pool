@@ -293,7 +293,10 @@ pub mod pallet {
                 .try_into()
                 .map_err(|_| Error::<T>::NameTooLong)?;
 
-            let mut bounded_participants = BoundedVec::default();
+            let mut bounded_participants = BoundedVec::<
+                <T as frame_system::Config>::AccountId,
+                <T as pallet::Config>::MaxPoolParticipants,
+            >::default();
 
             ensure!(
                 bounded_participants.try_push(owner.clone()).is_ok(),
