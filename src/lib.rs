@@ -1,3 +1,4 @@
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::EncodeLike;
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -105,7 +106,7 @@ pub enum Region {
 
 impl Into<Region> for Vec<u8> {
     fn into(self) -> Region {
-        match std::str::from_utf8(&self).unwrap() {
+        match String::from_utf8(self).unwrap().as_str() {
             "Alberta" => Region::Alberta,
             "BritishColumbia" => Region::BritishColumbia,
             "Manitoba" => Region::Manitoba,
