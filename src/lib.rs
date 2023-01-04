@@ -7,6 +7,7 @@ use frame_support::traits::Len;
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::fmt::Debug;
+use core::primitive::str;
 
 pub use pallet::*;
 
@@ -106,7 +107,7 @@ pub enum Region {
 
 impl Into<Region> for Vec<u8> {
     fn into(self) -> Region {
-        match std::str::from_utf8(&self).unwrap() {
+        match str::from_utf8(&self).unwrap() {
             "Alberta" => Region::Alberta,
             "BritishColumbia" => Region::BritishColumbia,
             "Manitoba" => Region::Manitoba,
