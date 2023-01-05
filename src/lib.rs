@@ -43,7 +43,7 @@ pub struct Pool<T: Config> {
     /// Number of outstanding join requests.
     pub request_number: u8,
     // Region of the pool
-    pub region: Region,
+    pub region: BoundedVec<u8, T::StringLimit>,
 }
 
 impl<T: Config> Pool<T> {
@@ -82,47 +82,6 @@ pub(crate) enum VoteResult {
     Denied,
     /// Not conclusive yet.
     Inconclusive,
-}
-
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
-/// An enum that represents a reion of the pool
-pub enum Region {
-    Alberta,
-    BritishColumbia,
-    Manitoba,
-    NewBrunswick,
-    NewfoundlandAndLabrador,
-    NovaScotia,
-    #[default]
-    Ontario,
-    PrinceEdwardIsland,
-    Quebec,
-    Saskatchewan,
-    NorthwestTerritories,
-    Nunavut,
-    Yukon,
-    Other,
-}
-
-impl Into<Region> for Vec<u8> {
-    fn into(self) -> Region {
-        match String::from_utf8(self).unwrap().as_str() {
-            "Alberta" => Region::Alberta,
-            "BritishColumbia" => Region::BritishColumbia,
-            "Manitoba" => Region::Manitoba,
-            "NewBrunswick" => Region::NewBrunswick,
-            "NewfoundlandAndLabrador" => Region::NewfoundlandAndLabrador,
-            "NovaScotia" => Region::NovaScotia,
-            "Ontario" => Region::Ontario,
-            "PrinceEdwardIsland" => Region::PrinceEdwardIsland,
-            "Quebec" => Region::Quebec,
-            "Saskatchewan" => Region::Saskatchewan,
-            "NorthwestTerritories" => Region::NorthwestTerritories,
-            "Nunavut" => Region::Nunavut,
-            "Yukon" => Region::Yukon,
-            &_ => Region::Other,
-        }
-    }
 }
 
 /// The current implementation of `PoolJoinRequest` only cares about positive votes and keeps track
@@ -337,6 +296,11 @@ pub mod pallet {
                 .try_into()
                 .map_err(|_| Error::<T>::NameTooLong)?;
 
+            let bounded_region: BoundedVec<u8, T::StringLimit> = region
+                .clone()
+                .try_into()
+                .map_err(|_| Error::<T>::NameTooLong)?;
+
             let mut bounded_participants =
                 BoundedVec::<T::AccountId, T::MaxPoolParticipants>::default();
 
@@ -347,7 +311,7 @@ pub mod pallet {
 
             let pool = Pool {
                 name: bounded_name,
-                region: region.into(),
+                region: bounded_region,
                 owner: Some(owner.clone()),
                 parent: None,
                 participants: bounded_participants,
