@@ -42,6 +42,8 @@ pub struct Pool<T: Config> {
     pub participants: BoundedVec<T::AccountId, T::MaxPoolParticipants>,
     /// Number of outstanding join requests.
     pub request_number: u8,
+    /// The region of the pool, bounded by Config::StringLimit
+    pub region: BoundedVec<u8, T::StringLimit>,
 }
 
 impl<T: Config> Pool<T> {
@@ -127,6 +129,43 @@ impl<T: Config> PoolRequest<T> {
         VoteResult::Inconclusive
     }
 }
+
+impl<T: Config> Encode for Pool<T> {
+    fn encode(&self) -> Vec<u8> {
+        let mut enc = self.name.encode();
+        enc.append(&mut self.owner.encode());
+        enc.append(&mut self.parent.encode());
+        enc.append(&mut self.participants.encode());
+        enc.append(&mut self.request_number.encode());
+        enc.append(&mut self.region.encode());
+        enc
+    }
+}
+
+impl<T: Config> Decode for Pool<T> {
+    fn decode<I: scale::Input>(input: &mut I) -> Result<Self, scale::Error> {
+        Ok(Self {
+            name: Decode::decode(input)?,
+            owner: Decode::decode(input)?,
+            parent: Decode::decode(input)?,
+            participants: Decode::decode(input)?,
+            request_number: Decode::decode(input)?,
+            region: Decode::decode(input)?,
+        })
+    }
+}
+
+impl<T: Config> MaxEncodedLen for Pool<T> {
+    fn max_encoded_len() -> usize {
+        BoundedVec::<u8, T::StringLimit>::max_encoded_len() * 2 +  // name + region
+        <Option<T::AccountId>>::max_encoded_len() +  // owner
+        <Option<PoolId>>::max_encoded_len() +  // parent
+        BoundedVec::<T::AccountId, T::MaxPoolParticipants>::max_encoded_len() +  // participants
+        <u8>::max_encoded_len()  // request_number
+    }
+}
+
+
 
 // TODO: Implement benchmarks for proper weight calculation
 #[frame_support::pallet]
@@ -273,6 +312,7 @@ pub mod pallet {
             origin: OriginFor<T>,
             name: Vec<u8>,
             peer_id: BoundedVec<u8, T::StringLimit>,
+            region: Vec<u8>
         ) -> DispatchResult {
             let owner = ensure_signed(origin)?;
             let mut user = Self::get_or_create_user(&owner);
@@ -293,6 +333,11 @@ pub mod pallet {
                 .try_into()
                 .map_err(|_| Error::<T>::NameTooLong)?;
 
+            let bounded_region: BoundedVec<u8, T::StringLimit> = region
+            .clone()
+            .try_into()
+            .map_err(|_| Error::<T>::RegionTooLong)?;
+
             let mut bounded_participants =
                 BoundedVec::<T::AccountId, T::MaxPoolParticipants>::default();
 
@@ -307,6 +352,7 @@ pub mod pallet {
                 parent: None,
                 participants: bounded_participants,
                 request_number: 0,
+                region: bounded_region,
             };
             Pools::<T>::insert(pool_id.clone(), pool);
             user.pool_id = Some(pool_id.clone());
