@@ -215,16 +215,11 @@ pub mod pallet {
             pool_id: PoolId,
         },
 
-        /// A user has been accepted to the pool
-        Accepted {
+        // Results of the voting proccess
+        VotingResult {
             account: T::AccountId,
             pool_id: PoolId,
-        },
-
-        /// A user has been denied access to the pool.
-        Denied {
-            account: T::AccountId,
-            pool_id: PoolId,
+            result: String,
         },
         /// Pool's capacity has been reached,
         CapacityReached { pool_id: PoolId },
@@ -530,9 +525,10 @@ pub mod pallet {
                             pool.participants = participants;
                             Self::remove_pool_request(who, pool_id, pool);
 
-                            Self::deposit_event(Event::<T>::Accepted {
+                            Self::deposit_event(Event::<T>::VotingResult {
                                 pool_id,
                                 account: who.clone(),
+                                result: String::try_from("Accepted").unwrap()
                             });
                             Ok(())
                         }
@@ -548,9 +544,10 @@ pub mod pallet {
 
                     Self::remove_pool_request(who, pool_id, pool);
 
-                    Self::deposit_event(Event::<T>::Denied {
+                    Self::deposit_event(Event::<T>::VotingResult {
                         pool_id,
                         account: who.clone(),
+                        result: String::try_from("Denied").unwrap()
                     });
 
                     Ok(())
@@ -559,6 +556,11 @@ pub mod pallet {
                 // and add the voter to the PoolRequest.
                 VoteResult::Inconclusive => {
                     PoolRequests::<T>::set(&pool_id, who, Some(request));
+                    Self::deposit_event(Event::<T>::VotingResult {
+                        pool_id,
+                        account: who.clone(),
+                        result: String::try_from("Inconclusive").unwrap()
+                    });
                     Ok(())
                 }
             }
