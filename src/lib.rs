@@ -219,7 +219,7 @@ pub mod pallet {
         VotingResult {
             account: T::AccountId,
             pool_id: PoolId,
-            result: String,
+            result: Vec<u8>,
         },
         /// Pool's capacity has been reached,
         CapacityReached { pool_id: PoolId },
@@ -524,11 +524,12 @@ pub mod pallet {
 
                             pool.participants = participants;
                             Self::remove_pool_request(who, pool_id, pool);
+                            let result = "Accepted";
 
                             Self::deposit_event(Event::<T>::VotingResult {
                                 pool_id,
                                 account: who.clone(),
-                                result: String::try_from("Accepted").unwrap()
+                                result: result.as_bytes().to_vec()
                             });
                             Ok(())
                         }
@@ -543,11 +544,12 @@ pub mod pallet {
                     Users::<T>::set(who, Some(user));
 
                     Self::remove_pool_request(who, pool_id, pool);
+                    let result = "Denied";
 
                     Self::deposit_event(Event::<T>::VotingResult {
                         pool_id,
                         account: who.clone(),
-                        result: String::try_from("Denied").unwrap()
+                        result: result.as_bytes().to_vec()
                     });
 
                     Ok(())
@@ -556,10 +558,11 @@ pub mod pallet {
                 // and add the voter to the PoolRequest.
                 VoteResult::Inconclusive => {
                     PoolRequests::<T>::set(&pool_id, who, Some(request));
+                    let result = "Inconclusive";
                     Self::deposit_event(Event::<T>::VotingResult {
                         pool_id,
                         account: who.clone(),
-                        result: String::try_from("Inconclusive").unwrap()
+                        result: result.as_bytes().to_vec()
                     });
                     Ok(())
                 }
