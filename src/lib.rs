@@ -423,6 +423,7 @@ pub mod pallet {
             pool_id: PoolId,
             account: T::AccountId,
             positive: bool,
+            peer_id: BoundedVec<u8, T::StringLimit>,
         ) -> DispatchResult {
             let voter = ensure_signed(origin)?;
             let voter_user = Self::get_user(&voter)?;
@@ -434,6 +435,8 @@ pub mod pallet {
                 voter_user.pool_id.is_some() && voter_user.pool_id.unwrap() == pool_id,
                 Error::<T>::AccessDenied
             );
+
+            ensure!(voter_user.peer_id == peer_id, Error::<T>::AccessDenied);
 
             let mut voted = request.voted.clone();
 
@@ -529,7 +532,7 @@ pub mod pallet {
                             Self::deposit_event(Event::<T>::VotingResult {
                                 pool_id,
                                 account: who.clone(),
-                                result: result.as_bytes().to_vec()
+                                result: result.as_bytes().to_vec(),
                             });
                             Ok(())
                         }
@@ -549,7 +552,7 @@ pub mod pallet {
                     Self::deposit_event(Event::<T>::VotingResult {
                         pool_id,
                         account: who.clone(),
-                        result: result.as_bytes().to_vec()
+                        result: result.as_bytes().to_vec(),
                     });
 
                     Ok(())
@@ -562,7 +565,7 @@ pub mod pallet {
                     Self::deposit_event(Event::<T>::VotingResult {
                         pool_id,
                         account: who.clone(),
-                        result: result.as_bytes().to_vec()
+                        result: result.as_bytes().to_vec(),
                     });
                     Ok(())
                 }
