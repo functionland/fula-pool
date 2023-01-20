@@ -436,7 +436,9 @@ pub mod pallet {
                 Error::<T>::AccessDenied
             );
 
-            ensure!(voter_user.peer_id == peer_id, Error::<T>::AccessDenied);
+            let requester = Self::get_user(&account)?;
+
+            ensure!(requester.peer_id == peer_id, Error::<T>::AccessDenied);
 
             let mut voted = request.voted.clone();
 
