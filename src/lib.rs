@@ -438,7 +438,10 @@ pub mod pallet {
 
             let requester = Self::get_user(&account)?;
 
-            ensure!(requester.peer_id == peer_id, Error::<T>::AccessDenied);
+            ensure!(
+                requester.peer_id.to_vec() == peer_id.to_vec(),
+                Error::<T>::AccessDenied
+            );
 
             let mut voted = request.voted.clone();
 
