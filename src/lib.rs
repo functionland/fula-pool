@@ -381,6 +381,7 @@ pub mod pallet {
             ensure!(user.is_free(), Error::<T>::UserBusy);
 
             user.request_pool_id = Some(pool_id);
+            user.peer_id = peer_id.clone();
             Users::<T>::set(&account, Some(user));
 
             let mut request = PoolRequest::<T>::default();
