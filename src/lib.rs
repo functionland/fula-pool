@@ -314,7 +314,7 @@ pub mod pallet {
             };
             Pools::<T>::insert(pool_id.clone(), pool);
             user.pool_id = Some(pool_id.clone());
-            user.peer_id = peer_id.into();
+            user.peer_id = peer_id;
             Users::<T>::set(&owner, Some(user));
 
             Self::deposit_event(Event::<T>::PoolCreated {
@@ -436,10 +436,8 @@ pub mod pallet {
                 Error::<T>::AccessDenied
             );
 
-            let requester = Self::get_user(&account)?;
-
             ensure!(
-                requester.peer_id.to_vec() == peer_id.to_vec(),
+                request.peer_id.to_vec() == peer_id.to_vec(),
                 Error::<T>::AccessDenied
             );
 
