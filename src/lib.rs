@@ -42,6 +42,8 @@ pub struct Pool<T: Config> {
     pub participants: BoundedVec<T::AccountId, T::MaxPoolParticipants>,
     /// Number of outstanding join requests.
     pub request_number: u8,
+    // Region of the pool
+    pub region: BoundedVec<u8, T::StringLimit>,
 }
 
 impl<T: Config> Pool<T> {
@@ -213,16 +215,11 @@ pub mod pallet {
             pool_id: PoolId,
         },
 
-        /// A user has been accepted to the pool
-        Accepted {
+        // Results of the voting proccess
+        VotingResult {
             account: T::AccountId,
             pool_id: PoolId,
-        },
-
-        /// A user has been denied access to the pool.
-        Denied {
-            account: T::AccountId,
-            pool_id: PoolId,
+            result: Vec<u8>,
         },
         /// Pool's capacity has been reached,
         CapacityReached { pool_id: PoolId },
@@ -272,6 +269,7 @@ pub mod pallet {
         pub fn create(
             origin: OriginFor<T>,
             name: Vec<u8>,
+            region: Vec<u8>,
             peer_id: BoundedVec<u8, T::StringLimit>,
         ) -> DispatchResult {
             let owner = ensure_signed(origin)?;
@@ -293,6 +291,11 @@ pub mod pallet {
                 .try_into()
                 .map_err(|_| Error::<T>::NameTooLong)?;
 
+            let bounded_region: BoundedVec<u8, T::StringLimit> = region
+                .clone()
+                .try_into()
+                .map_err(|_| Error::<T>::NameTooLong)?;
+
             let mut bounded_participants =
                 BoundedVec::<T::AccountId, T::MaxPoolParticipants>::default();
 
@@ -303,6 +306,7 @@ pub mod pallet {
 
             let pool = Pool {
                 name: bounded_name,
+                region: bounded_region,
                 owner: Some(owner.clone()),
                 parent: None,
                 participants: bounded_participants,
@@ -310,7 +314,7 @@ pub mod pallet {
             };
             Pools::<T>::insert(pool_id.clone(), pool);
             user.pool_id = Some(pool_id.clone());
-            user.peer_id = peer_id.into();
+            user.peer_id = peer_id;
             Users::<T>::set(&owner, Some(user));
 
             Self::deposit_event(Event::<T>::PoolCreated {
@@ -377,6 +381,7 @@ pub mod pallet {
             ensure!(user.is_free(), Error::<T>::UserBusy);
 
             user.request_pool_id = Some(pool_id);
+            user.peer_id = peer_id.clone();
             Users::<T>::set(&account, Some(user));
 
             let mut request = PoolRequest::<T>::default();
@@ -419,6 +424,7 @@ pub mod pallet {
             pool_id: PoolId,
             account: T::AccountId,
             positive: bool,
+            peer_id: BoundedVec<u8, T::StringLimit>,
         ) -> DispatchResult {
             let voter = ensure_signed(origin)?;
             let voter_user = Self::get_user(&voter)?;
@@ -428,6 +434,11 @@ pub mod pallet {
 
             ensure!(
                 voter_user.pool_id.is_some() && voter_user.pool_id.unwrap() == pool_id,
+                Error::<T>::AccessDenied
+            );
+
+            ensure!(
+                request.peer_id.to_vec() == peer_id.to_vec(),
                 Error::<T>::AccessDenied
             );
 
@@ -520,10 +531,12 @@ pub mod pallet {
 
                             pool.participants = participants;
                             Self::remove_pool_request(who, pool_id, pool);
+                            let result = "Accepted";
 
-                            Self::deposit_event(Event::<T>::Accepted {
+                            Self::deposit_event(Event::<T>::VotingResult {
                                 pool_id,
                                 account: who.clone(),
+                                result: result.as_bytes().to_vec(),
                             });
                             Ok(())
                         }
@@ -538,10 +551,12 @@ pub mod pallet {
                     Users::<T>::set(who, Some(user));
 
                     Self::remove_pool_request(who, pool_id, pool);
+                    let result = "Denied";
 
-                    Self::deposit_event(Event::<T>::Denied {
+                    Self::deposit_event(Event::<T>::VotingResult {
                         pool_id,
                         account: who.clone(),
+                        result: result.as_bytes().to_vec(),
                     });
 
                     Ok(())
@@ -550,6 +565,12 @@ pub mod pallet {
                 // and add the voter to the PoolRequest.
                 VoteResult::Inconclusive => {
                     PoolRequests::<T>::set(&pool_id, who, Some(request));
+                    let result = "Inconclusive";
+                    Self::deposit_event(Event::<T>::VotingResult {
+                        pool_id,
+                        account: who.clone(),
+                        result: result.as_bytes().to_vec(),
+                    });
                     Ok(())
                 }
             }
