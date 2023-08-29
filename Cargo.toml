@@ -3,9 +3,14 @@ name = 'fula-pool'
 version = "0.1.0"
 authors = ["functionland"]
 edition = "2021"
+#SBP-M1 review: LICENSE file mentions MIT
+#SBP-M1 review: ensure that licenses satisfy the requirements of all dependencies
 license = "Proprietary"
+#SBP-M1 review: no description
+#SBP-M1 review: no repository
 
 [dependencies]
+#SBP-M1 review: move to single line
 codec = { package = "parity-scale-codec", version = "3.2.2", default-features = false, features = [
     "derive",
 ] }
@@ -19,6 +24,7 @@ sp-std = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v
 sp-core = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.43", default-features = false }
 
 [dev-dependencies]
+#SBP-M1 review: unused
 serde_json = "1.0.87"
 
 [features]
