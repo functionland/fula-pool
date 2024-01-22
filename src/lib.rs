@@ -117,7 +117,7 @@ impl<T: Config> PoolRequest<T> {
     /// A method that checks whether or not a user has been accepted to a pool.
     pub(crate) fn check_votes(&self, num_participants: u16) -> VoteResult {
         // Define the minimum votes required as the smaller of num_participants / 3 or 8
-        let min_votes_required = std::cmp::min(num_participants / 3, 8);
+        let min_votes_required = core::cmp::min(num_participants / 3, 8);
 
         // More than half of the participants voted against this user.
         if self.voted.len() as u16 - self.positive_votes > num_participants / 2 {
