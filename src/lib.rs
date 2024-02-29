@@ -7,6 +7,7 @@ use frame_support::traits::Len;
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::fmt::Debug;
+use core::cmp;
 
 pub use pallet::*;
 
@@ -141,7 +142,7 @@ impl<T: Config> PoolRequest<T> {
         }
 
         // Continue with existing logic
-        let min_votes_required = std::cmp::min(num_participants / 3, 8);
+        let min_votes_required = cmp::min(num_participants / 3, 8);
 
         // More than half of the participants voted against this user.
         if self.voted.len() as u16 - self.positive_votes > num_participants / 2 {
