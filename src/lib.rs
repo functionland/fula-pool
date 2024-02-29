@@ -133,11 +133,11 @@ impl<T: Config> PoolRequest<T> {
 
          // Short-circuit approval if the pool owner voted yes
         for voter in &self.voted {
-            if let Some(owner) = pool.owner {
-                if *voter == owner && self.positive_votes >= 1 {
+            if let Some(ref owner) = pool.owner {
+                if *voter == *owner && self.positive_votes >= 1 {
                     return VoteResult::Accepted;
                 }
-            }
+            }            
         }
 
         // Continue with existing logic
