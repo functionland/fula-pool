@@ -115,16 +115,24 @@ impl<T: Config> Default for PoolRequest<T> {
 
 impl<T: Config> PoolRequest<T> {
     /// A method that checks whether or not a user has been accepted to a pool.
-    pub(crate) fn check_votes(&self, num_participants: u16) -> VoteResult {
-        // Define the minimum votes required as the smaller of num_participants / 3 or 8
-        let min_votes_required = core::cmp::min(num_participants / 3, 8);
+    pub(crate) fn check_votes(&self, num_participants: u16, pool_id: PoolId) -> VoteResult { // Include pool_id
+        let pool = Pallet::<T>::pool(pool_id).unwrap_or_default(); // Fetch the pool
+
+         // Short-circuit approval if the pool owner voted yes
+        for voter in &self.voted {
+            if *voter == pool.owner.unwrap_or_default() && self.positive_votes >= 1 {
+                return VoteResult::Accepted;
+            }
+        }
+
+        // Continue with existing logic
+        let min_votes_required = std::cmp::min(num_participants / 3, 8);
 
         // More than half of the participants voted against this user.
         if self.voted.len() as u16 - self.positive_votes > num_participants / 2 {
             return VoteResult::Denied;
         }
 
-        // Check if the positive votes are greater than the minimum required votes
         if self.positive_votes > min_votes_required {
             return VoteResult::Accepted;
         }
