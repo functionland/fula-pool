@@ -113,6 +113,19 @@ impl<T: Config> Default for PoolRequest<T> {
     }
 }
 
+impl<T: Config> Default for Pool<T> {
+    fn default() -> Self {
+        Pool {
+            name: BoundedVec::default(), 
+            owner: None, 
+            parent: None, 
+            participants: BoundedVec::default(), 
+            request_number: 0, 
+            region: BoundedVec::default(),  
+        }
+    }
+}
+
 impl<T: Config> PoolRequest<T> {
     /// A method that checks whether or not a user has been accepted to a pool.
     pub(crate) fn check_votes(&self, num_participants: u16, pool_id: PoolId) -> VoteResult { // Include pool_id
@@ -480,7 +493,7 @@ pub mod pallet {
                     // TODO: to be removed when we implement copy for pools.
                     ensure!(!pool.is_full(), Error::<T>::CapacityReached);
 
-                    let result = request.check_votes(pool.participants.len() as u16);
+                    let result = request.check_votes(pool.participants.len() as u16, pool_id);
                     Self::process_vote_result(&account, pool_id, pool, request, result)
                 }
             }
