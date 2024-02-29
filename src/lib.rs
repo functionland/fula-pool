@@ -28,7 +28,7 @@ pub type BoundedStringOf<T> = BoundedVec<u8, <T as Config>::StringLimit>;
 
 /// Pool
 /// TODO: we we need an actual list of users in each pool? If so - we'll need to rething the storage
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, TypeInfo, MaxEncodedLen)]
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct Pool<T: Config> {
     /// Pool name, bounded by Config::StringLimit
