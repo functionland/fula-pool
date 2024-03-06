@@ -8,8 +8,35 @@ use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::fmt::Debug;
 use core::cmp;
+use frame_support::pallet_prelude::Weight;
+
 
 pub use pallet::*;
+
+pub trait WeightInfo {
+    fn create() -> Weight;
+    fn leave_pool() -> Weight;
+    fn join() -> Weight;
+    fn cancel_join() -> Weight;
+    fn vote() -> Weight;
+}
+impl WeightInfo for () {
+    fn create() -> Weight {
+        Weight::from(10_000u64) as Weight // Example weight; adjust based on your expectations
+    }
+    fn leave_pool() -> Weight {
+        Weight::from(10_000u64) as Weight
+    }
+    fn join() -> Weight {
+        Weight::from(10_000u64) as Weight
+    }
+    fn cancel_join() -> Weight {
+        Weight::from(10_000u64) as Weight
+    }
+    fn vote() -> Weight {
+        Weight::from(10_000u64) as Weight
+    }
+}
 
 pub trait PoolInterface {
     type AccountId;
@@ -19,8 +46,6 @@ pub trait PoolInterface {
 
 use frame_support::{dispatch::DispatchResult, ensure, traits::Get, BoundedVec};
 use sp_std::prelude::*;
-
-pub use pallet::*;
 
 /// Type used for a unique identifier of each pool.
 pub type PoolId = u32;
@@ -157,6 +182,9 @@ impl<T: Config> PoolRequest<T> {
     }
 }
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
 // TODO: Implement benchmarks for proper weight calculation
 #[frame_support::pallet]
 pub mod pallet {
@@ -185,6 +213,8 @@ pub mod pallet {
         /// The maximum number of pool participants. We are aiming at `u8::MAX`.
         #[pallet::constant]
         type MaxPoolParticipants: Get<u32>;
+
+        type WeightInfo: WeightInfo;
     }
 
     /// An incremental value reflecting all pools created so far.
@@ -292,7 +322,8 @@ pub mod pallet {
         /// TODO: Deposit; check the current pool number. Currently we check the PoolId to retrieve
         /// the pool number, but if we want to delete empty pools - then we need to retrieve the
         /// actual pool number from storage, for which a CountedMap should be used.
-        #[pallet::weight(10_000)]
+        #[pallet::weight(T::WeightInfo::create())]
+        #[pallet::call_index(0)]
         pub fn create(
             origin: OriginFor<T>,
             name: Vec<u8>,
@@ -353,11 +384,34 @@ pub mod pallet {
         }
 
         /// Allows for the user to leave a pool.
-        #[pallet::weight(10_000)]
-        pub fn leave_pool(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
-            let account = ensure_signed(origin)?;
+        #[pallet::weight(T::WeightInfo::leave_pool())]
+        #[pallet::call_index(1)]
+        pub fn leave_pool(
+            origin: OriginFor<T>, 
+            pool_id: PoolId,
+            target_account: Option<T::AccountId>, // Optional target account parameter
+        ) -> DispatchResult {
+            let caller = ensure_signed(origin)?;
 
-            let mut user = Self::get_user(&account)?;
+            // Retrieve the pool to check if the caller is the owner
+            let pool = Pools::<T>::get(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
+
+            // Determine the account to be removed from the pool
+            let account_to_remove = match target_account {
+                Some(account) if Some(&caller) == pool.owner.as_ref() || caller == account => {
+                    // If the caller is the owner, they can remove any account
+                    // If the caller is the target_account themselves, they can remove themselves
+                    account
+                },
+                None => {
+                    // If no target account is specified and caller is not the owner, it defaults to the caller
+                    ensure!(pool.owner.is_none() || pool.owner == Some(caller.clone()), Error::<T>::AccessDenied);
+                    caller
+                },
+                _ => return Err(Error::<T>::AccessDenied.into()), // Deny if not owner and trying to remove another account
+            };
+
+            let mut user = Users::<T>::get(&account_to_remove).ok_or(Error::<T>::UserDoesNotExist)?;
             ensure!(
                 user.pool_id.is_some() && pool_id == user.pool_id.unwrap(),
                 Error::<T>::AccessDenied
@@ -366,16 +420,16 @@ pub mod pallet {
             let mut pool: Pool<T> = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
             let mut participants = pool.participants.clone();
 
-            match participants.binary_search(&account) {
+            match participants.binary_search(&account_to_remove) {
                 Ok(index) => {
                     participants.remove(index);
                     pool.participants = participants;
                     Pools::<T>::set(&pool_id, Some(pool));
 
                     user.pool_id = None;
-                    Users::<T>::set(&account, Some(user));
+                    Users::<T>::set(&account_to_remove, Some(user));
 
-                    Self::deposit_event(Event::<T>::ParticipantLeft { pool_id, account });
+                    Self::deposit_event(Event::<T>::ParticipantLeft { pool_id, account: account_to_remove });
                     Ok(())
                 }
                 // This should never happen, but if it does - what do we do? One option is to
@@ -392,7 +446,8 @@ pub mod pallet {
         }
 
         /// Open a `PoolRequest` to join the pool.
-        #[pallet::weight(10_000)]
+        #[pallet::weight(T::WeightInfo::join())]
+        #[pallet::call_index(2)]
         pub fn join(
             origin: OriginFor<T>,
             pool_id: PoolId,
@@ -423,21 +478,48 @@ pub mod pallet {
 
         /// Cancel a `PoolRequest`, useful if a user decides to join another pool or they are stuck in
         /// the voting queue for too long.
-        #[pallet::weight(10_000)]
-        pub fn cancel_join(origin: OriginFor<T>, pool_id: PoolId) -> DispatchResult {
-            let account = ensure_signed(origin)?;
-            Self::request(&pool_id, &account).ok_or(Error::<T>::RequestDoesNotExist)?;
-            let mut user = Self::user(&account).ok_or(Error::<T>::UserDoesNotExist)?;
+        #[pallet::weight(T::WeightInfo::cancel_join())]
+        #[pallet::call_index(3)]
+        pub fn cancel_join(
+            origin: OriginFor<T>, 
+            pool_id: PoolId, 
+            target_account: Option<T::AccountId>, // Optional target account parameter
+        ) -> DispatchResult {
+            let caller = ensure_signed(origin)?;
+
+            // Retrieve the pool to check if the caller is the owner
+            let pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
+
+            // Determine the account whose join request is being cancelled
+            let account_to_cancel = match target_account {
+                Some(account) if Some(&caller) == pool.owner.as_ref() => {
+                    // If the caller is the owner, they can cancel anyone's request
+                    account
+                },
+                None => {
+                    // If no target account is specified, it defaults to the caller
+                    // This maintains backward compatibility for users cancelling their own requests
+                    caller.clone()
+                },
+                _ => return Err(Error::<T>::AccessDenied.into()), // Deny if not owner and trying to cancel for another account
+            };
+            
+            Self::request(&pool_id, &account_to_cancel).ok_or(Error::<T>::RequestDoesNotExist)?;
+            let mut user = Self::user(&account_to_cancel).ok_or(Error::<T>::UserDoesNotExist)?;
             let pool = Self::pool(&pool_id).ok_or(Error::<T>::PoolDoesNotExist)?;
 
             user.request_pool_id = None;
-            Users::<T>::set(&account, Some(user));
+            Users::<T>::set(&account_to_cancel, Some(user));
 
-            PoolRequests::<T>::remove(&pool_id, &account);
+            PoolRequests::<T>::remove(&pool_id, &account_to_cancel);
 
-            Self::remove_pool_request(&account, pool_id, pool);
+            Self::remove_pool_request(&account_to_cancel, pool_id, pool);
 
-            Self::deposit_event(Event::<T>::RequestWithdrawn { pool_id, account });
+            Self::deposit_event(Event::<T>::RequestWithdrawn { 
+                pool_id, 
+                account: account_to_cancel, 
+            });
+            
             Ok(())
         }
 
@@ -445,7 +527,8 @@ pub mod pallet {
         /// This method also calculates votes each time it's called and takes action once the result
         /// is conclusive.
         /// TODO: Currently does not cover pool overflow scenario and simply fails then.
-        #[pallet::weight(10_000)]
+        #[pallet::weight(T::WeightInfo::vote())]
+        #[pallet::call_index(4)]
         pub fn vote(
             origin: OriginFor<T>,
             pool_id: PoolId,
