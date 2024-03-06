@@ -22,19 +22,19 @@ pub trait WeightInfo {
 }
 impl WeightInfo for () {
     fn create() -> Weight {
-        Weight::from(10_000u64) as Weight // Example weight; adjust based on your expectations
+        10_000u64.into() // Example weight; adjust based on your expectations
     }
     fn leave_pool() -> Weight {
-        Weight::from(10_000u64) as Weight
+        10_000u64.into()
     }
     fn join() -> Weight {
-        Weight::from(10_000u64) as Weight
+        10_000u64.into()
     }
     fn cancel_join() -> Weight {
-        Weight::from(10_000u64) as Weight
+        10_000u64.into()
     }
     fn vote() -> Weight {
-        Weight::from(10_000u64) as Weight
+        10_000u64.into()
     }
 }
 
